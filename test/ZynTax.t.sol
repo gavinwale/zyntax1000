@@ -28,6 +28,14 @@ contract ZynTaxTest is Test, Deployers, GasSnapshot {
     PoolKey public poolKey;
     address public constant MARKETING_WALLET = address(0x123);
 
+    // Constants
+    uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;
+    bytes constant ZERO_BYTES = "";
+    uint160 constant MIN_SQRT_RATIO = 4295128740;
+    uint160 constant MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970341;
+    int24 constant MIN_TICK = -887220;
+    int24 constant MAX_TICK = 887220;
+
     function setUp() public {
         // Deploy the pool manager, utility routers, and test tokens
         deployFreshManagerAndRouters();
@@ -53,8 +61,9 @@ contract ZynTaxTest is Test, Deployers, GasSnapshot {
         manager.modifyLiquidity(
             poolKey,
             IPoolManager.ModifyLiquidityParams({
-                tickLower: TickMath.minUsableTick(60),
-                tickUpper: TickMath.maxUsableTick(60),
+                owner: address(this), // Added owner parameter
+                tickLower: MIN_TICK,
+                tickUpper: MAX_TICK,
                 liquidityDelta: 1000000 ether
             }),
             ZERO_BYTES
@@ -68,10 +77,15 @@ contract ZynTaxTest is Test, Deployers, GasSnapshot {
         IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
             zeroForOne: true,
             amountSpecified: 100 ether,
-            sqrtPriceLimitX96: 1 // lol
+            sqrtPriceLimitX96: MIN_SQRT_RATIO + 1
         });
 
         BalanceDelta delta = manager.swap(poolKey, params, ZERO_BYTES);
+
+        // Calculate the actual tax
+        int128 amount0 = delta.amount0();
+        uint256 amount0Out = amount0 < 0 ? uint256(-amount0) : uint256(amount0);
+        uint256 actualTax = initialBalance - zyntaxToken.balanceOf(address(this)) - amount0Out;
 
         // Check that the hook collected taxes
         assertGt(zyntaxToken.balanceOf(address(0xdead)), 0, "Burn tax not collected");
@@ -81,7 +95,6 @@ contract ZynTaxTest is Test, Deployers, GasSnapshot {
 
         // Check that the total tax is correct (6% of 100 ether)
         uint256 expectedTax = 6 ether;
-        uint256 actualTax = 6 ether; // lol
         assertEq(actualTax, expectedTax, "Total tax amount is incorrect");
     }
 }
